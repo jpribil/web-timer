@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Odpočet 90:00</title>
+<meta name="description" content="Celostránkový odpočet do nuly. Nastav minuty, spusť, pauzuj, resetuj.">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@200;400;500&display=swap">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23000'/><circle cx='50' cy='55' r='30' fill='none' stroke='%23fff' stroke-width='7'/><path d='M50 40v17h13' stroke='%23fff' stroke-width='7' fill='none' stroke-linecap='round'/></svg>">
+<style>
+  :root{
+    --ground:#000000;
+    --ink:#ffffff;
+    --dim:#6b6e76;
+    --hairline:#26282e;
+    --accent:#ffb020;
+    --focus:#8ab4ff;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    touch-action:manipulation;
+  }
+  .stage{
+    height:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:clamp(1.5rem,4vh,3.5rem);
+    padding:clamp(1rem,3vh,2rem);
+  }
+  .clock{
+    font-weight:200;
+    line-height:1;
+    letter-spacing:0;
+    white-space:nowrap;
+    user-select:none;
+    cursor:default;
+    font-size:12vw;            /* nahrazeno JS měřením na 80 % šířky okna */
+    transition:color .2s linear, opacity .2s linear;
+  }
+  .seg{
+    display:inline-block;
+    line-height:1;
+    border-bottom:.035em solid transparent;
+  }
+  body[data-mode="set"] .seg{cursor:text}
+  body[data-mode="set"] .seg.active{border-bottom-color:var(--accent)}
+  @media (prefers-reduced-motion: no-preference){
+    body[data-mode="set"] .seg.active{animation:pulse 1.15s steps(1,end) infinite}
+    @keyframes pulse{0%,55%{border-bottom-color:var(--accent)}56%,100%{border-bottom-color:transparent}}
+  }
+  .colon{opacity:.55}
+  body[data-mode="run"] .colon{animation:tick 1s steps(1,end) infinite}
+  @media (prefers-reduced-motion: reduce){
+    body[data-mode="run"] .colon{animation:none}
+  }
+  @keyframes tick{0%,50%{opacity:.55}51%,100%{opacity:.12}}
+  body[data-warn="1"] .clock{color:var(--accent)}
+  body[data-mode="done"] .clock{color:var(--accent);animation:done 1s steps(1,end) infinite}
+  @keyframes done{0%,50%{opacity:1}51%,100%{opacity:.15}}
+  @media (prefers-reduced-motion: reduce){
+    body[data-mode="done"] .clock{animation:none}
+  }
+
+  .controls{display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center}
+  button{
+    font:inherit;
+    -webkit-tap-highlight-color:transparent;
+    font-weight:500;
+    font-size:clamp(.8rem,1.5vh,1rem);
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ink);
+    background:transparent;
+    border:1px solid var(--hairline);
+    border-radius:2px;
+    padding:.7em 1.6em;
+    cursor:pointer;
+    transition:border-color .15s, color .15s, background-color .15s;
+  }
+  button:hover:not(:disabled){border-color:var(--dim);background:#0b0c0e}
+  button:disabled{color:var(--hairline);border-color:#141519;cursor:default}
+  button:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+  #primary:not(:disabled){border-color:#3a3d45}
+  .step{padding:.7em 1.1em;letter-spacing:0;font-weight:400}
+  body:not([data-mode="set"]) .step{display:none}
+
+  .hint{
+    color:var(--dim);
+    font-size:clamp(.66rem,1.3vh,.8rem);
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    text-align:center;
+    margin:0;
+    max-width:min(92vw,56ch);
+    text-wrap:balance;
+  }
+  @media (max-height:420px){ .hint{display:none} }
+</style>
+</head>
+<body data-mode="set">
+  <main class="stage">
+    <div class="clock" id="clock" role="timer" aria-live="off" aria-label="Zbývající čas"><span class="seg active" id="mm" data-seg="m">05</span><span class="colon">:</span><span class="seg" id="ss" data-seg="s">00</span></div>
+    <div class="controls">
+      <button id="minus" class="step" type="button" aria-label="Odečíst">&minus;</button>
+      <button id="plus" class="step" type="button" aria-label="Přičíst">+</button>
+      <button id="primary" type="button">Start</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+    <p class="hint" id="hint">Piš číslice nebo šipky &middot; mezerník start/pauza &middot; R reset</p>
+  </main>
+
+<script>
+(function(){
+  "use strict";
+
+  var MAX = 90 * 60;          // 90 minut, tvrdý strop
+  var clock   = document.getElementById('clock');
+  var mmEl    = document.getElementById('mm');
+  var ssEl    = document.getElementById('ss');
+  var primary = document.getElementById('primary');
+  var resetBtn= document.getElementById('reset');
+  var hint    = document.getElementById('hint');
+
+  var setTotal   = 5 * 60;    // nastavený čas v sekundách
+  var remaining  = setTotal;  // zbývá v ms při běhu
+  var remainMs   = setTotal * 1000;
+  var endAt      = 0;
+  var raf        = 0;
+  var mode       = 'set';     // set | run | pause | done
+  var seg        = 'm';       // aktivní pozice při nastavování: minuty napřed
+  var typed      = 0;         // kolik číslic uživatel napsal v aktuálním segmentu
+  var touch      = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+  var HINTS = touch ? {
+    set:   'Ťukni na minuty nebo sekundy, uprav − a +',
+    run:   'Pauza kdykoliv · Reset vrátí nastavený čas',
+    pause: 'Pokračuj, nebo resetuj',
+    done:  'Konec · Reset vrátí nastavený čas'
+  } : {
+    set:   'Piš číslice nebo šipky · mezerník start · R reset',
+    run:   'Mezerník pauza · R reset',
+    pause: 'Mezerník pokračovat · R reset',
+    done:  'Konec · R reset'
+  };
+
+  /* ---------- velikost číslic: přesně 80 % šířky okna ---------- */
+  var canvas = document.createElement('canvas');
+  var ctx = canvas.getContext('2d');
+
+  function fit(){
+    var probe = 200;
+    ctx.font = '200 ' + probe + 'px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+    var w = ctx.measureText('00:00').width || probe * 3;
+    var size = (window.innerWidth * 0.8) * probe / w;
+    var maxByHeight = window.innerHeight * 0.56;
+    clock.style.fontSize = Math.max(24, Math.min(size, maxByHeight)) + 'px';
+  }
+
+  /* ---------- render ---------- */
+  function pad(n){ return (n < 10 ? '0' : '') + n; }
+
+  var BASE_TITLE = 'Odpočet 90:00';
+  var shown = -1;
+  function paint(totalSec, force){
+    var t = Math.max(0, Math.min(MAX, totalSec));
+    if (t !== shown || force){
+      shown = t;
+      mmEl.textContent = pad(Math.floor(t / 60));
+      ssEl.textContent = pad(t % 60);
+    }
+    var title = (mode === 'run' || mode === 'pause')
+      ? pad(Math.floor(t / 60)) + ':' + pad(t % 60) + (mode === 'pause' ? ' · pauza' : '')
+      : BASE_TITLE;
+    if (title !== document.title) document.title = title;
+    clock.setAttribute('aria-label', Math.floor(t / 60) + ' minut ' + (t % 60) + ' sekund');
+    document.body.setAttribute('data-warn', (mode === 'run' && t <= 10 && t > 0) ? '1' : '0');
+  }
+
+  function syncUI(){
+    document.body.setAttribute('data-mode', mode);
+    mmEl.classList.toggle('active', mode === 'set' && seg === 'm');
+    ssEl.classList.toggle('active', mode === 'set' && seg === 's');
+
+    if (mode === 'run'){
+      primary.textContent = 'Pauza';
+      primary.disabled = false;
+      hint.textContent = HINTS.run;
+    } else if (mode === 'pause'){
+      primary.textContent = 'Pokračovat';
+      primary.disabled = false;
+      hint.textContent = HINTS.pause;
+    } else if (mode === 'done'){
+      primary.textContent = 'Start';
+      primary.disabled = true;
+      hint.textContent = HINTS.done;
+    } else {
+      primary.textContent = 'Start';
+      primary.disabled = setTotal === 0;
+      hint.textContent = HINTS.set;
+    }
+    resetBtn.disabled = (mode === 'set' && setTotal === 0);
+  }
+
+  /* ---------- běh ---------- */
+  function loop(){
+    remainMs = endAt - Date.now();
+    if (remainMs <= 0){
+      remainMs = 0;
+      mode = 'done';
+      holdScreen(false);
+      paint(0);
+      syncUI();
+      return;
+    }
+    paint(Math.ceil(remainMs / 1000));
+    raf = requestAnimationFrame(loop);
+  }
+
+  var wake = null;
+  function holdScreen(on){
+    try {
+      if (on && !wake && navigator.wakeLock){
+        navigator.wakeLock.request('screen').then(function(w){ wake = w; }, function(){});
+      } else if (!on && wake){
+        wake.release(); wake = null;
+      }
+    } catch (err) { /* nepodstatné */ }
+  }
+
+  function start(){
+    if (setTotal === 0) return;
+    if (mode === 'set' || mode === 'done') remainMs = setTotal * 1000;
+    endAt = Date.now() + remainMs;
+    mode = 'run';
+    holdScreen(true);
+    syncUI();
+    cancelAnimationFrame(raf);
+    loop();
+  }
+
+  function pause(){
+    cancelAnimationFrame(raf);
+    remainMs = Math.max(0, endAt - Date.now());
+    mode = 'pause';
+    holdScreen(false);
+    paint(Math.ceil(remainMs / 1000));
+    syncUI();
+  }
+
+  function toggle(){
+    if (mode === 'run') pause(); else start();
+  }
+
+  function reset(){
+    cancelAnimationFrame(raf);
+    mode = 'set';
+    holdScreen(false);
+    seg = 'm';
+    typed = 0;
+    remainMs = setTotal * 1000;
+    paint(setTotal);
+    syncUI();
+  }
+
+  /* ---------- nastavování času ---------- */
+  function clampSet(){
+    if (setTotal > MAX) setTotal = MAX;
+    if (setTotal < 0) setTotal = 0;
+  }
+
+  function parts(){
+    return { m: Math.floor(setTotal / 60), s: setTotal % 60 };
+  }
+
+  function setParts(m, s){
+    setTotal = m * 60 + s;
+    clampSet();
+    paint(setTotal);
+    syncUI();
+  }
+
+  function typeDigit(d){
+    if (mode !== 'set') return;
+    var p = parts();
+    if (seg === 'm'){
+      var m = (typed === 0) ? d : (p.m % 10) * 10 + d;
+      if (m > 90) m = d;
+      setParts(m, p.s);
+      typed++;
+      if (typed >= 2){ seg = 's'; typed = 0; }
+    } else {
+      var s = (typed === 0) ? d : (p.s % 10) * 10 + d;
+      if (s > 59) s = d;
+      setParts(p.m, s);
+      typed++;
+      if (typed >= 2){ typed = 0; }
+    }
+    syncUI();
+  }
+
+  function bump(delta){
+    if (mode !== 'set') return;
+    var p = parts();
+    typed = 0;
+    if (seg === 'm'){
+      var m = p.m + delta;
+      if (m < 0) m = 90; if (m > 90) m = 0;
+      setParts(m, p.s);
+    } else {
+      var s = p.s + delta;
+      if (s < 0) s = 59; if (s > 59) s = 0;
+      setParts(p.m, s);
+    }
+  }
+
+  function focusSeg(which){
+    if (mode !== 'set') return;
+    seg = which;
+    typed = 0;
+    syncUI();
+  }
+
+  /* ---------- vstupy ---------- */
+  document.addEventListener('keydown', function(e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+
+    if (k === ' ' || k === 'Spacebar' || k === 'Enter'){
+      if (document.activeElement && document.activeElement.tagName === 'BUTTON' && k !== ' ') return;
+      e.preventDefault(); toggle(); return;
+    }
+    if (k === 'r' || k === 'R' || k === 'Escape'){ e.preventDefault(); reset(); return; }
+    if (k >= '0' && k <= '9'){ e.preventDefault(); typeDigit(+k); return; }
+    if (k === 'ArrowUp'){ e.preventDefault(); bump(1); return; }
+    if (k === 'ArrowDown'){ e.preventDefault(); bump(-1); return; }
+    if (k === 'ArrowLeft'){ e.preventDefault(); focusSeg('m'); return; }
+    if (k === 'ArrowRight'){ e.preventDefault(); focusSeg('s'); return; }
+    if (k === 'Tab' && mode === 'set' && !e.shiftKey && document.activeElement === document.body){
+      e.preventDefault(); focusSeg(seg === 'm' ? 's' : 'm'); return;
+    }
+    if (k === 'Backspace'){
+      e.preventDefault();
+      if (mode !== 'set') return;
+      var p = parts();
+      typed = 0;
+      if (seg === 'm') setParts(0, p.s); else setParts(p.m, 0);
+    }
+  });
+
+  mmEl.addEventListener('pointerdown', function(e){ e.preventDefault(); if (mode !== 'set') reset(); focusSeg('m'); });
+  ssEl.addEventListener('pointerdown', function(e){ e.preventDefault(); if (mode !== 'set') reset(); focusSeg('s'); });
+  document.getElementById('minus').addEventListener('click', function(e){ bump(-1); e.currentTarget.blur(); });
+  document.getElementById('plus').addEventListener('click', function(e){ bump(1); e.currentTarget.blur(); });
+  primary.addEventListener('click', function(){ toggle(); primary.blur(); });
+  resetBtn.addEventListener('click', function(){ reset(); resetBtn.blur(); });
+
+  window.addEventListener('resize', fit);
+  window.addEventListener('orientationchange', fit);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden && mode === 'run'){ cancelAnimationFrame(raf); holdScreen(true); loop(); }
+  });
+
+  /* ---------- init ---------- */
+  fit();
+  paint(setTotal);
+  syncUI();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+</script>
+</body>
+</html>
