@@ -229,15 +229,37 @@
     raf = requestAnimationFrame(loop);
   }
 
-  var wake = null;
-  function holdScreen(on){
+  /* ---------- držení displeje (Screen Wake Lock) ----------
+     Android uvolní zámek pokaždé, když se karta schová nebo zhasne displej,
+     takže si držíme vlastní záměr (wantWake) a po návratu zámek bereme znovu. */
+  var wake = null;        // aktivní sentinel, nebo null
+  var wantWake = false;   // chceme držet displej rozsvícený?
+  var wakePending = false;
+
+  function acquireWake(){
+    if (!wantWake || wake || wakePending) return;
+    if (!navigator.wakeLock || document.visibilityState !== 'visible') return;
+    wakePending = true;
     try {
-      if (on && !wake && navigator.wakeLock){
-        navigator.wakeLock.request('screen').then(function(w){ wake = w; }, function(){});
-      } else if (!on && wake){
-        wake.release(); wake = null;
-      }
-    } catch (err) { /* nepodstatné */ }
+      navigator.wakeLock.request('screen').then(function(sentinel){
+        wakePending = false;
+        if (!wantWake){ sentinel.release(); return; }
+        wake = sentinel;
+        sentinel.addEventListener('release', function(){
+          wake = null;                 // uvolnil ho systém — zkusíme znovu, až budeme vidět
+          if (wantWake) acquireWake();
+        });
+      }, function(){ wakePending = false; });   // zamítnuto (http, baterie, nepodporováno)
+    } catch (err) { wakePending = false; }
+  }
+
+  function holdScreen(on){
+    wantWake = !!on;
+    if (on) { acquireWake(); return; }
+    if (wake){
+      try { wake.release(); } catch (err) { /* nepodstatné */ }
+      wake = null;
+    }
   }
 
   function start(){
@@ -370,8 +392,12 @@
   window.addEventListener('resize', fit);
   window.addEventListener('orientationchange', fit);
   document.addEventListener('visibilitychange', function(){
-    if (!document.hidden && mode === 'run'){ cancelAnimationFrame(raf); holdScreen(true); loop(); }
+    if (document.hidden) return;
+    acquireWake();
+    if (mode === 'run'){ cancelAnimationFrame(raf); loop(); }
   });
+  window.addEventListener('focus', acquireWake);
+  window.addEventListener('pageshow', acquireWake);
 
   /* ---------- init ---------- */
   fit();

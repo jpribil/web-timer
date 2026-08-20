@@ -17,8 +17,20 @@ Celostránkový countdown timer. Jedna stránka, jeden soubor, žádné závislo
 | reset | `R`, `Esc` | tlačítko Reset |
 
 Poslední minuta pod 10 sekund zežloutne, po doběhnutí `00:00` bliká.
-Za běhu drží obrazovku rozsvícenou (Screen Wake Lock, kde je k dispozici)
-a zbývající čas se zrcadlí v titulku záložky.
+Zbývající čas se zrcadlí v titulku záložky.
+
+## Displej se za běhu neuspí
+
+Dokud odpočet běží, drží stránka Screen Wake Lock — telefon nezhasne.
+Zámek se bere při startu a při každém návratu do popředí, protože Android
+ho sám uvolní pokaždé, když se karta schová nebo displej zhasne; proto se
+sleduje záměr zvlášť od sentinelu a poslouchá se jeho `release`.
+Uvolní se při pauze, resetu i po doběhnutí na `00:00`.
+
+Podmínky: HTTPS (nebo `localhost`), karta v popředí, prohlížeč s podporou
+Screen Wake Lock API — Chrome, Edge a Samsung Internet na Androidu ano,
+Firefox pro Android zatím ne. Když API chybí nebo je požadavek zamítnut,
+odpočet běží dál, jen se displej uspává standardně.
 
 ## Spuštění
 
